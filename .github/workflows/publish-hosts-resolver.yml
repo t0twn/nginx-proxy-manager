@@ -1,0 +1,100 @@
+name: Publish hosts resolver image
+
+on:
+  schedule:
+    # Monthly, at 03:17 UTC on the first day of the month.
+    - cron: '17 3 1 * *'
+  workflow_dispatch:
+    inputs:
+      npm_base:
+        description: 'NPM base image (tag or digest)'
+        required: true
+        default: 'jc21/nginx-proxy-manager:latest'
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+# Serialize writes to latest, including runs dispatched from different branches.
+concurrency:
+  group: publish-hosts-resolver-latest
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      NPM_BASE: ${{ inputs.npm_base || 'jc21/nginx-proxy-manager:latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Determine image name
+        id: image
+        shell: bash
+        run: printf 'name=ghcr.io/%s\n' "${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate image test runner
+        run: python3 -m unittest discover -s test -p 'test_image_runner.py'
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image for integration tests
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          pull: true
+          tags: npm-hosts:test
+          build-args: |
+            NPM_BASE=${{ env.NPM_BASE }}
+          cache-from: type=gha,scope=hosts-resolver-test
+          cache-to: type=gha,mode=max,scope=hosts-resolver-test
+
+      - name: Run integration and container startup tests
+        run: python3 test-image.py npm-hosts:test
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish multi-platform image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          pull: true
+          push: true
+          tags: ${{ steps.image.outputs.name }}:latest
+          build-args: |
+            NPM_BASE=${{ env.NPM_BASE }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: |
+            type=gha,scope=hosts-resolver-test
+            type=gha,scope=hosts-resolver-publish
+          cache-to: type=gha,mode=max,scope=hosts-resolver-publish
+
+      - name: Write publication summary
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}:latest
+        run: |
+          {
+            printf 'Published `%s` for `linux/amd64` and `linux/arm64`.\n\n' "$IMAGE"
+            printf 'Pull with: `docker pull %s`\n' "$IMAGE"
+          } >> "$GITHUB_STEP_SUMMARY"

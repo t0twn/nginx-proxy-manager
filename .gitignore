@@ -1,0 +1,4 @@
+/data/
+/letsencrypt/
+/.env
+__pycache__/

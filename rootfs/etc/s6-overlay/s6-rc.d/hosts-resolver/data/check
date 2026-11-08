@@ -1,0 +1,8 @@
+#!/usr/bin/env node
+// Short-lived startup check only; no Node process remains after readiness.
+const socket = require("node:net").createConnection({
+	host: "127.0.0.1", port: Number(process.argv[2] || 5353),
+});
+socket.setTimeout(500, () => process.exit(1));
+socket.on("error", () => process.exit(1));
+socket.on("connect", () => { socket.destroy(); process.exit(0); });

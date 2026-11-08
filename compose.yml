@@ -1,0 +1,19 @@
+services:
+  npm:
+    image: ${NPM_HOSTS_IMAGE:-npm-hosts:local}
+    build:
+      context: .
+      args:
+        NPM_BASE: ${NPM_BASE:-jc21/nginx-proxy-manager:latest}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "127.0.0.1:81:81"
+      - "443:443"
+    environment:
+      ENABLE_HOSTS_RESOLVER: "true"
+    extra_hosts:
+      - "backend.internal:192.168.1.20"
+    volumes:
+      - ./data:/data
+      - ./letsencrypt:/etc/letsencrypt
